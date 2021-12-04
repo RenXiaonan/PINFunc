@@ -6,7 +6,7 @@
 ##################### Call packages and functions #################
 
 library(MASS)
-source("D:/renxn/research/202008HoSIN HoSPIN/00桌面文件00/code/整理代码/PINFunc.R")
+source("PINFunc.R")
 
 ######################### Homogeneity model ########################
 ### Generate simulated datasets:            
