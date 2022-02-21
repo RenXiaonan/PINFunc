@@ -273,39 +273,23 @@ DataC <- function(dataDiv){
   y=dataDiv[[6]]
   
   # For Y
-  y_train_max=list()
-  y_train_min=list()
-  for(i in 1:length(y_train_yu)){
-    y_train_max[[i]]=max(y[[i]])
-    y_train_min[[i]]=min(y[[i]])
-  }
-  
   y_train=list()
   for(i in 1:length(y_train_yu)){
-    y_train[[i]]<-(y_train_yu[[i]]-y_train_min[[i]])/(y_train_max[[i]]-y_train_min[[i]])
+    y_train[[i]]<-(y_train_yu[[i]]-min(y_train_yu[[i]]))/(max(y_train_yu[[i]])-min(y_train_yu[[i]]))
   }
-  
   y_test=list()
   for(i in 1:length(y_test_yu)){
-    y_test[[i]]<-(y_test_yu[[i]]-y_train_min[[i]])/(y_train_max[[i]]-y_train_min[[i]])
+    y_test[[i]]<-(y_test_yu[[i]]-min(y_test_yu[[i]]))/(max(y_test_yu[[i]])-min(y_test_yu[[i]]))
   }
   
   # For X
-  x_train_mean=list()
-  x_train_std=list()
-  for(i in 1:length(x_train_yu)){
-    x_train_mean[[i]]=apply(x[[i]],2,mean)
-    x_train_std[[i]]=sqrt(apply(x[[i]],2,var))
-  }
-  
   x_train=list()
   for(i in 1:length(x_train_yu)){
-    x_train[[i]]<-(x_train_yu[[i]]-matrix(1,nrow=nrow(x_train_yu[[i]]),ncol=1 ) %*% matrix(x_train_mean[[i]],nrow=1) ) / (matrix(1,nrow=nrow(x_train_yu[[i]]),ncol=1) %*% matrix(x_train_std[[i]],nrow=1))
+    x_train[[i]]<-scale(x_train_yu[[i]],center = T,scale=T)
   }
-  
   x_test=list()
   for(i in 1:length(x_test_yu)){
-    x_test[[i]]<-(x_test_yu[[i]]-matrix(1,nrow=nrow(x_test_yu[[i]]),ncol=1 ) %*% matrix(x_train_mean[[i]],nrow=1) ) / (matrix(1,nrow=nrow(x_test_yu[[i]]),ncol=1 ) %*% matrix(x_train_std[[i]],nrow=1))
+    x_test[[i]]<-scale(x_test_yu[[i]],center = T,scale=T)
   }
   
   # Return
@@ -327,7 +311,7 @@ dtanh=function(x){
 
 ##################### Algorithm - HoPIN #######################
 ####### This function will give the selected feature   ########
-hopin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,Lambda,activiation,a,threshold,node){
+hopin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,Lambda,a,threshold,node){
   ##### Input: #####
   # x: a list contain all datasets' X
   #	y: a list contain all datasets' response Y
@@ -339,7 +323,6 @@ hopin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,Lambda,activiation,a,th
   # eta: learning rate
   # lambda: tuning parameter for variable selection in the objective function
   # Lambda: tuning parameter for preventing overfitting in the objective function
-  #	activiation: activation function
   #	a: smoothing parameter for the smoothing function in the objective function
   #	threshold: variable selection threshold
   #
@@ -348,8 +331,6 @@ hopin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,Lambda,activiation,a,th
   #	index: selected important variables for each dataset (a vector)
   #	SSE: total SSE between fitted values and true values
   #	tt: number of final iterations
-
-  if(activiation=="tanh"){
     
     p=dim(x[[1]])[2] #p is the number of variables
     q=node #q is the number of hidden nodes
@@ -1063,8 +1044,6 @@ hopin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,Lambda,activiation,a,th
       
     }
     #HoPIN training
-    
-  }
   
   index=NULL
   #generate variable index
@@ -1091,7 +1070,7 @@ hopin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,Lambda,activiation,a,th
     }
   } #compute SSE among d datasets
   
-  return(list(w=w,W=W,b=b,index=index,SSE=SSE,iteration=tt))
+  return(list(m=m,w=w,W=W,b=b,index=index,SSE=SSE,iteration=tt,yhat=O))
 }
 ###############################################################
 
@@ -1100,7 +1079,7 @@ hopin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,Lambda,activiation,a,th
 
 ##################### Algorithm - HePIN #######################
 ####### This function will give the selected feature   ########
-hepin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,betapen,Lambda,activiation,a,sig,threshold,node){
+hepin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,beta,Lambda,a,sig,threshold,node){
   ##### Input: #####
   # x: a list contain all datasets' X
   #	y: a list contain all datasets' response Y
@@ -1110,9 +1089,8 @@ hepin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,betapen,Lambda,activiat
   #	maxiter: maximum number of iterations
   # alpha: momentum parameter
   # eta: learning rate
-  # lambda, betapen: tunning parameters for variable selection in the objective function
+  # lambda, beta: tunning parameters for variable selection in the objective function
   # Lambda: tunning parameter for preventing overfitting in the objective function
-  #	activiation: activation function
   #	a, sig: smoothing parameters for the smoothing function in the objective function
   #	threshold: threshold: variable selection threshold
   #
@@ -1941,12 +1919,69 @@ hepin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,betapen,Lambda,activiat
     }
   }#compute SSE among d datasets
   
-  return(list(w=w,W=W,b=b,index=index,SSE=SSE,iteration=tt))
+  return(list(m=m,w=w,W=W,b=b,index=index,SSE=SSE,iteration=tt,yhat=O))
 }
 ###################################################################
 
 
+#############################################################
+#####                                                   #####
+#####                                                   #####
+#####                    Data prediction                #####
+#####                                                   #####
+#####                                                   #####
+#############################################################
 
+pre_pin=function(newx,pin){
+  ##### Input: #####
+  # newx: List of new values for X at which predictions are to be made.
+  #	pin: Fitted "PIN" object.
+  ##### Output: #####
+  # A list containing the predicted values of all datasets given newx.
+  
+  m=pin$m
+  b=pin$b
+  w=pin$w
+  W=pin$W
+  d=length(newx)
+  O_pre=list()
+  for(i in 1:d){
+    O_pre[[i]]=matrix(rep(0,dim(newx[[i]])[1]),ncol = 1)
+  }
+  
+  if(m==1){
+    
+    for(i in 1:d){
+      for(j in 1:(dim(newx[[i]])[1])){
+        
+        l=1
+        h=t(tanh( W[[i]][[l]] %*% w[[i]] %*% t(t(newx[[i]][j,])) + b[[i]][[l]] ) )
+        O_pre[[i]][j]=tanh( W[[i]][[m+1]] %*% t(h) + b[[i]][[m+1]] )
+        
+      }
+    }
+    
+  }else{
+    
+    for(i in 1:d){
+      for(j in 1:(dim(newx[[i]])[1])){
+        
+        l=1
+        h=t(tanh( W[[i]][[l]] %*% w[[i]] %*% t(t(newx[[i]][j,])) + b[[i]][[l]] ) )
+        repeat{
+          l=l+1
+          h=t (tanh( W[[i]][[l]] %*% t(h) + b[[i]][[l]] ) )
+          if(l == m)
+            break
+        }
+        O_pre[[i]][j]=tanh( W[[i]][[m+1]] %*% t(h) + b[[i]][[m+1]] )
+        
+      }
+    }
+  }
+  return(O_pre)
+}
+###################################################################
 
 #############################################################
 #####                                                   #####
@@ -1964,6 +1999,8 @@ Eva <- function(index, b){
   ##### Input: #####
   # index: important variables selected by the network for the i-th dataset
   #	b: model coefficients of the i-th dataset
+  ##### Output: #####
+  # Evaluation Index (SEN, SPE, GM, CCR) for the i-th dataset.
   
   trueindex=which(b!=0)
   TP=0
