@@ -48,7 +48,7 @@ for (s in 1:10) {
   y=dataClean[[2]]
   
   set.seed(1)
-  ho_pin=hopin(x,y,m,varepsilon=1e-3,maxiter=500,alpha=0.1,eta,lambda,Lambda,activiation='tanh',a=0.04,threshold=0.15,node=round(sqrt(p)))
+  ho_pin=hopin(x,y,m,varepsilon=1e-3,maxiter=500,alpha=0.1,eta,lambda,Lambda,a=0.04,threshold=0.15,node=round(sqrt(p)))
   index=ho_pin$index
   eva=rbind(eva,Eva(index,b1))
   
@@ -102,7 +102,7 @@ for (s in 1:10) {
   y=dataClean[[2]]
   
   set.seed(2)
-  he_pin=hepin(x,y,m,varepsilon=1e-3,maxiter=500,alpha=0.1,eta,lambda,betapen,Lambda,activiation='tanh',a=0.04,sig=0.04,threshold=0.05,node=round(sqrt(p)))
+  he_pin=hepin(x,y,m,varepsilon=1e-3,maxiter=500,alpha=0.1,eta,lambda,beta,Lambda,a=0.04,sig=0.04,threshold=0.05,node=round(sqrt(p)))
   index1=he_pin$index[[1]]
   index2=he_pin$index[[2]]
   index3=he_pin$index[[3]]
