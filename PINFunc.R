@@ -6,7 +6,7 @@
 #####                                                   #####
 #############################################################
 
-################## Generate Data (single data) ##############
+####################### Generate Data   #####################
 ### There are four data distributions for four cases.     ###
 
 ####### Case I - Linear under homogeneity model  #######
