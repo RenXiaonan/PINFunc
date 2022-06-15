@@ -7,9 +7,9 @@
 #############################################################
 
 ################## Generate Data (single data) ##############
-### There are four data distributions for four Cases.     ###
+### There are four data distributions for four cases.     ###
 
-####### Case I - Linear under Homogeneity model  #######
+####### Case I - Linear under homogeneity model  #######
 # Named as DataHoLinear.
 
 DataHoLinear <- function(n1, n2, n3, b1, b2, b3, p, corval){
@@ -17,8 +17,8 @@ DataHoLinear <- function(n1, n2, n3, b1, b2, b3, p, corval){
   # n2: sample size of dataset 2
   # n3: sample size of dataset 3
   # b1: model coefficients of dataset 1
-  # b2: model coefficients of dataset 1
-  # b3: model coefficients of dataset 1
+  # b2: model coefficients of dataset 2
+  # b3: model coefficients of dataset 3
   # p : dimensions
   # corval: correlation coefficient of power structure
   # 
@@ -60,7 +60,7 @@ DataHoLinear <- function(n1, n2, n3, b1, b2, b3, p, corval){
 ###############################################################
 
 
-####### Case II - Non-linear under Homogeneity model  #######
+####### Case II - Nonlinear under homogeneity model  #######
 # Named as DataHoNonLinear.
 
 DataHoNonLinear <- function(n1, n2, n3, b1, b2, b3, p, corval){
@@ -113,7 +113,7 @@ DataHoNonLinear <- function(n1, n2, n3, b1, b2, b3, p, corval){
 ###############################################################
 
 
-####### Case III - linear under heterogeneity models  #######
+####### Case III - linear under heterogeneity model  #######
 # Named as DataHeLinear.
 
 DataHeLinear <- function(n1, n2, n3, b1, b2, b3, p, corval){
@@ -155,7 +155,7 @@ DataHeLinear <- function(n1, n2, n3, b1, b2, b3, p, corval){
 ###############################################################
 
 
-####### Case IV - Nonlinear under heterogeneity models  #######
+####### Case IV - Nonlinear under heterogeneity model  #######
 # Named as DataHeNonLinear.
 
 DataHeNonLinear <- function(n1, n2, n3, b1, b2, b3, p, corval){
@@ -223,8 +223,8 @@ DataHeNonLinear <- function(n1, n2, n3, b1, b2, b3, p, corval){
 
 
 ##################### Data division #####################
-DataDiv <- function(data, divrate){
-  # Divide each dataset into training set and test set. The training set is used to train a PIN network, and the test set is used to select important variables for new data.
+DataDiv <- function(data, trainrate){
+  # Divide each dataset into training set and test set. The training set is used to train a PIN network and select important variables, and the test set is used to obtain prediction.
   x1=data$x1
   x2=data$x2
   x3=data$x3
@@ -258,6 +258,7 @@ DataDiv <- function(data, divrate){
   dataDiv <- list(x_train_yu, x_test_yu, y_train_yu, y_test_yu, x, y)
   return(dataDiv)		
 }
+
 ###############################################################
 
 
@@ -269,27 +270,41 @@ DataC <- function(dataDiv){
   x_test_yu=dataDiv[[2]]
   y_train_yu=dataDiv[[3]]
   y_test_yu=dataDiv[[4]]
-  x=dataDiv[[5]]
-  y=dataDiv[[6]]
   
   # For Y
+  y_train_max=list()
+  y_train_min=list()
+  for(i in 1:length(y_train_yu)){
+    y_train_max[[i]]=max(y_train_yu[[i]])
+    y_train_min[[i]]=min(y_train_yu[[i]])
+  }
+  
   y_train=list()
   for(i in 1:length(y_train_yu)){
-    y_train[[i]]<-(y_train_yu[[i]]-min(y_train_yu[[i]]))/(max(y_train_yu[[i]])-min(y_train_yu[[i]]))
+    y_train[[i]]<-(y_train_yu[[i]]-y_train_min[[i]])/(y_train_max[[i]]-y_train_min[[i]])
   }
+  
   y_test=list()
   for(i in 1:length(y_test_yu)){
-    y_test[[i]]<-(y_test_yu[[i]]-min(y_test_yu[[i]]))/(max(y_test_yu[[i]])-min(y_test_yu[[i]]))
+    y_test[[i]]<-(y_test_yu[[i]]-y_train_min[[i]])/(y_train_max[[i]]-y_train_min[[i]])
   }
   
   # For X
+  x_train_mean=list()
+  x_train_std=list()
+  for(i in 1:length(x_train_yu)){
+    x_train_mean[[i]]=apply(x_train_yu[[i]],2,mean)
+    x_train_std[[i]]=sqrt(apply(x_train_yu[[i]],2,var))
+  }
+  
   x_train=list()
   for(i in 1:length(x_train_yu)){
-    x_train[[i]]<-scale(x_train_yu[[i]],center = T,scale=T)
+    x_train[[i]]<-(x_train_yu[[i]]-matrix(1,nrow=nrow(x_train_yu[[i]]),ncol=1 ) %*% matrix(x_train_mean[[i]],nrow=1) ) / (matrix(1,nrow=nrow(x_train_yu[[i]]),ncol=1) %*% matrix(x_train_std[[i]],nrow=1))
   }
+  
   x_test=list()
   for(i in 1:length(x_test_yu)){
-    x_test[[i]]<-scale(x_test_yu[[i]],center = T,scale=T)
+    x_test[[i]]<-(x_test_yu[[i]]-matrix(1,nrow=nrow(x_test_yu[[i]]),ncol=1 ) %*% matrix(x_train_mean[[i]],nrow=1) ) / (matrix(1,nrow=nrow(x_test_yu[[i]]),ncol=1 ) %*% matrix(x_train_std[[i]],nrow=1))
   }
   
   # Return
@@ -311,516 +326,492 @@ dtanh=function(x){
 
 ##################### Algorithm - HoPIN #######################
 ####### This function will give the selected feature   ########
-hopin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,Lambda,a,threshold,node){
+hopin=function(x,y,m,varepsilon=1e-3,maxiter=500,alpha=0.1,eta,lambda,Lambda,a=0.04,threshold,node){
   ##### Input: #####
   # x: a list contain all datasets' X
   #	y: a list contain all datasets' response Y
   #	m: number of layers
   # node: number of hidden nodes
-  # varepsilon: condition of convergence
-  #	maxiter: maximum number of iterations
-  # alpha: momentum parameter
+  # varepsilon: condition of convergence, default 1e-3
+  #	maxiter: maximum number of iterations, default 500
+  # alpha: momentum parameter, default 0.1
   # eta: learning rate
   # lambda: tuning parameter for variable selection in the objective function
   # Lambda: tuning parameter for preventing overfitting in the objective function
-  #	a: smoothing parameter for the smoothing function in the objective function
+  #	a: smoothing parameter for the smoothing function in the objective function, default 0.04
   #	threshold: variable selection threshold
   #
   ##### Output: #####
-  # w, W, b: the values of w, W, and b in the fitted network
+  # m, w, W, b: the values of m, w, W, and b in the fitted network
   #	index: selected important variables for each dataset (a vector)
-  #	SSE: total SSE between fitted values and true values
+  #	yhat: the prediction values for each dataset (a list)
+  #	SSE: SSE between fitted values and true values of all datasets
   #	tt: number of final iterations
+  
+  p=dim(x[[1]])[2] #p is the number of variables
+  q=node #q is the number of hidden nodes
+  d=length(x) #d is the number of datasets
+  tt=0 #t is the record of iteration
+  
+  w=list()
+  for(i in 1:d){
+    w[[i]]=diag(p)
+  } # w is initialization weight matrix list for input
+  
+  Vw=list()
+  for(i in 1:d){
+    Vw[[i]]=matrix(0,nrow=p,ncol=p)
+  } # Vw is initialization 1st moment matrix list for w
+  
+  dw=list()
+  for(i in 1:d){
+    dw[[i]]=matrix(0,nrow=p,ncol=p)
+  } # dw initialization
+  
+  diffw=list()
+  for(i in 1:d){
+    diffw[[i]]=matrix(0,nrow=p,ncol=p)
+  } # w difference initialization diffw  
+  
+  if(m==1){
     
-    p=dim(x[[1]])[2] #p is the number of variables
-    q=node #q is the number of hidden nodes
-    d=length(x) #d is the number of datasets
-    tt=0 #t is the record of iteration
-    
-    w=list()
+    W=list()
     for(i in 1:d){
-      w[[i]]=diag(p)
-    } # w is initialization weight matrix list for input
+      W[[i]]=list()
+      W[[i]][[1]]=matrix(runif(q*p,min = - sqrt(6/(q+p)), max = sqrt(6/(q+p)) ),nrow=q)
+    }
     
-    Vw=list()
     for(i in 1:d){
-      Vw[[i]]=matrix(0,nrow=p,ncol=p)
-    } # Vw is initialization 1st moment matrix list for w
+      W[[i]][[m+1]]=matrix(runif(q,min = - sqrt(6/(q+1)), max = sqrt(6/(q+1)) ),nrow=1)
+    } # W is initialization weight matrix list
     
-    dw=list()
+    b=list()
     for(i in 1:d){
-      dw[[i]]=matrix(0,nrow=p,ncol=p)
-    } # dw initialization
+      b[[i]]=list()
+      for(l in 1:m){
+        b[[i]][[l]]=matrix(0,nrow=q)
+      }
+    }
     
-    diffw=list()
     for(i in 1:d){
-      diffw[[i]]=matrix(0,nrow=p,ncol=p)
-    } # w difference initialization diffw  
+      b[[i]][[m+1]]=matrix(0,nrow=1)
+    } # b is initialization bias matrix list
+    
+    O=list()
+    for(i in 1:d){
+      O[[i]]=matrix(rep(0,dim(x[[i]])[1]),ncol = 1)
+    }
+    
+    for(i in 1:d){
+      for(j in 1:(dim(x[[i]])[1])){
+        l=1
+        h=t( tanh( W[[i]][[l]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[l]] ) )
+        O[[i]][j]=tanh( W[[i]][[m+1]] %*% t(h) + b[[i]][[m+1]] )
+        
+      }
+    } # compute Output O
+    
+    dO=list()
+    for(i in 1:d){
+      dO[[i]]= matrix(rep(0,dim(x[[i]])[1]),ncol = 1)
+    }
+    for(i in 1:d){
+      for(j in 1:(dim(x[[i]])[1])){
+        dO[[i]][j]=dtanh( W[[i]][[m+1]] %*% t(h) + b[[i]][[m+1]] )
+      }
+    } # dO initialization
+    
+    VW=list()
+    for(i in 1:d){
+      VW[[i]]=list()
+      VW[[i]][[1]]=matrix(rep(0,q*p),nrow=q)
+    }
+    
+    for(i in 1:d){
+      VW[[i]][[m+1]]=matrix(rep(0,q),nrow=1)
+    } # VW is initialization 1st moment matrix list for W
+    
+    Vb=list()
+    for(i in 1:d){
+      Vb[[i]]=list()
+      for(l in 1:m){
+        Vb[[i]][[l]]=matrix(0,nrow=q)
+      }
+    }
+    
+    for(i in 1:d){
+      Vb[[i]][[m+1]]=matrix(0,nrow=1)
+    } # Vb is initialization 1st moment matrix list for b
+    
+    H=list()
+    for(i in 1:d){
+      H[[i]]=list()
+    }
+    for(i in 1:d){
+      for(l in 1:m){
+        H[[i]][[l]]=matrix( rep( 0 , dim(x[[i]])[1] * q ),ncol=q)
+      }
+    } #H initialization
+    
+    dH=list()
+    for(i in 1:d){
+      dH[[i]]=list()
+    }
+    for(i in 1:d){
+      for(l in 1:m){
+        dH[[i]][[l]]=matrix( rep( 0 , dim(x[[i]])[1] * q ),ncol=q)
+      }
+    } # dH initialization
+    
+    C=diag(p) # C initialization
+    
+    dW=list()
+    for(i in 1:d){
+      dW[[i]]=list()
+      dW[[i]][[1]]=matrix( rep(0,q*p) ,nrow=q)
+    }
+    
+    for(i in 1:d){
+      dW[[i]][[m+1]]=matrix( rep(0,q) ,nrow=1)
+    } # dW initialization
+    
+    db=list()
+    for(i in 1:d){
+      db[[i]]=list()
+      for(l in 1:m){
+        db[[i]][[l]]=matrix(0,nrow=q)
+      }
+    }
+    
+    for(i in 1:d){
+      db[[i]][[m+1]]=matrix(0,nrow=1)
+    } # db initialization
+    
+    diffW=list()
+    for(i in 1:d){
+      diffW[[i]]=list()
+      diffW[[i]][[1]]=matrix( rep(0,q*p) ,nrow=q)
+    }
+    
+    for(i in 1:d){
+      diffW[[i]][[m+1]]=matrix( rep(0,q) ,nrow=1)
+    } #W difference initialization diffW
+  }else{
+    W=list()
+    for(i in 1:d){
+      W[[i]]=list()
+      W[[i]][[1]]=matrix(runif(q*p,min = - sqrt(6/(q+p)), max = sqrt(6/(q+p)) ),nrow=q)
+    }
+    
+    for(i in 1:d){
+      for(l in 2:m){
+        W[[i]][[l]]=matrix(runif(q*q,min = - sqrt(6/(q+q)), max = sqrt(6/(q+q)) ),nrow=q)
+      }
+    }
+    
+    for(i in 1:d){
+      W[[i]][[m+1]]=matrix(runif(q,min = - sqrt(6/(q+1)), max = sqrt(6/(q+1)) ),nrow=1)
+    } #W is initialization weight matrix list
+    
+    b=list()
+    for(i in 1:d){
+      b[[i]]=list()
+      for(l in 1:m){
+        b[[i]][[l]]=matrix(0,nrow=q)
+      }
+    }
+    
+    for(i in 1:d){
+      b[[i]][[m+1]]=matrix(0,nrow=1)
+    } #b is initialization bias matrix list
+    
+    O=list()
+    for(i in 1:d){
+      O[[i]]=matrix(rep(0,dim(x[[i]])[1]),ncol = 1)
+    }
+    
+    for(i in 1:d){
+      for(j in 1:(dim(x[[i]])[1])){
+        
+        l=1
+        h=t( tanh( W[[i]][[l]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[l]] ) )
+        repeat{
+          l=l+1
+          h=t (tanh( W[[i]][[l]] %*% t(h) + b[[i]][[l]] ) )
+          if(l == m)
+            break
+        }
+        O[[i]][j]=tanh( W[[i]][[m+1]] %*% t(h) + b[[i]][[m+1]] )
+        
+      }
+    } #compute Output O
+    
+    dO=list()
+    for(i in 1:d){
+      dO[[i]]= matrix(rep(0,dim(x[[i]])[1]),ncol = 1)
+    }
+    for(i in 1:d){
+      for(j in 1:(dim(x[[i]])[1])){
+        l=1
+        h=t( tanh( W[[i]][[l]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[l]] ) )
+        repeat{
+          l=l+1
+          h=t (tanh( W[[i]][[l]] %*% t(h) + b[[i]][[l]] ) )
+          if(l == m)
+            break
+        }
+        dO[[i]][j]=dtanh( W[[i]][[m+1]] %*% t(h) + b[[i]][[m+1]] )        
+      }
+    } #dO initialization
+    
+    VW=list()
+    for(i in 1:d){
+      VW[[i]]=list()
+      VW[[i]][[1]]=matrix(rep(0,q*p),nrow=q)
+    }
+    
+    for(i in 1:d){
+      for(l in 2:m){
+        VW[[i]][[l]]=matrix(rep(0,q*q),nrow=q)
+      }
+    }
+    
+    for(i in 1:d){
+      VW[[i]][[m+1]]=matrix(rep(0,q),nrow=1)
+    } #VW is initialization 1st moment matrix list for W
+    
+    Vb=list()
+    for(i in 1:d){
+      Vb[[i]]=list()
+      for(l in 1:m){
+        Vb[[i]][[l]]=matrix(0,nrow=q)
+      }
+    }
+    
+    for(i in 1:d){
+      Vb[[i]][[m+1]]=matrix(0,nrow=1)
+    } #Vb is initialization 1st moment matrix list for b
+    
+    H=list()
+    for(i in 1:d){
+      H[[i]]=list()
+    }
+    for(i in 1:d){
+      for(l in 1:m){
+        H[[i]][[l]]=matrix( rep( 0 , dim(x[[i]])[1] * q ),ncol=q)
+      }
+    } #H initialization
+    
+    dH=list()
+    for(i in 1:d){
+      dH[[i]]=list()
+    }
+    for(i in 1:d){
+      for(l in 1:m){
+        dH[[i]][[l]]=matrix( rep( 0 , dim(x[[i]])[1] * q ),ncol=q)
+      }
+    } #dH initialization
+    
+    C=diag(p) #C initialization
+    
+    dW=list()
+    for(i in 1:d){
+      dW[[i]]=list()
+      dW[[i]][[1]]=matrix( rep(0,q*p) ,nrow=q)
+    }
+    
+    for(i in 1:d){
+      for(l in 2:m){
+        dW[[i]][[l]]=matrix( rep(0,q*q) ,nrow=q)
+      }
+    }
+    
+    for(i in 1:d){
+      dW[[i]][[m+1]]=matrix( rep(0,q) ,nrow=1)
+    } #dW initialization
+    
+    db=list()
+    for(i in 1:d){
+      db[[i]]=list()
+      for(l in 1:m){
+        db[[i]][[l]]=matrix(0,nrow=q)
+      }
+    }
+    
+    for(i in 1:d){
+      db[[i]][[m+1]]=matrix(0,nrow=1)
+    } #db initialization
+    
+    diffW=list()
+    for(i in 1:d){
+      diffW[[i]]=list()
+      diffW[[i]][[1]]=matrix( rep(0,q*p) ,nrow=q)
+    }
+    
+    for(i in 1:d){
+      for(l in 2:m){
+        diffW[[i]][[l]]=matrix( rep(0,q*q) ,nrow=q)
+      }
+    }
+    
+    for(i in 1:d){
+      diffW[[i]][[m+1]]=matrix( rep(0,q) ,nrow=1)
+    } #W difference initialization diffW
+  }
+  
+  
+  plot(1:maxiter, seq(0,0.01,length.out = maxiter), xlim = c(1,maxiter), ylim = c (0,0.01), type = "n", axes = F, xlab = "iteration times", ylab="maximum difference")
+  box()
+  axis(side = 1, at = c(seq(1,maxiter+1,length.out=51)))
+  axis(side = 2, at = c(seq(0,0.01,length.out = 21)))
+  abline(h=0.001,col="red")
+  #generate a null plot
+  
+  repeat{
+    w_C<-w
+    for(k in 1:p){
+      sum_w=0
+      for(i in 1:d){
+        sum_w = sum_w + (w_C[[i]][k,k])^2
+      }
+      if(sum_w <= d * 10^(-20)){
+        for(i in 1:d){
+          w_C[[i]][k,k]=10^(-10)
+        }
+      }
+    }#prevent small value 
     
     if(m==1){
-      
-      W=list()
-      for(i in 1:d){
-        W[[i]]=list()
-        W[[i]][[1]]=matrix(runif(q*p,min = - sqrt(6/(q+p)), max = sqrt(6/(q+p)) ),nrow=q)
-      }
-      
-      for(i in 1:d){
-        W[[i]][[m+1]]=matrix(runif(q,min = - sqrt(6/(q+1)), max = sqrt(6/(q+1)) ),nrow=1)
-      } # W is initialization weight matrix list
-      
-      b=list()
-      for(i in 1:d){
-        b[[i]]=list()
-        for(l in 1:m){
-          b[[i]][[l]]=matrix(0,nrow=q)
-        }
-      }
-      
-      for(i in 1:d){
-        b[[i]][[m+1]]=matrix(0,nrow=1)
-      } # b is initialization bias matrix list
-      
-      O=list()
-      for(i in 1:d){
-        O[[i]]=matrix(rep(0,dim(x[[i]])[1]),ncol = 1)
-      }
-      
       for(i in 1:d){
         for(j in 1:(dim(x[[i]])[1])){
-          l=1
-          h=t( tanh( W[[i]][[l]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[l]] ) )
-          O[[i]][j]=tanh( W[[i]][[m+1]] %*% t(h) + b[[i]][[m+1]] )
-          
-        }
-      } # compute Output O
-      
-      dO=list()
-      for(i in 1:d){
-        dO[[i]]= matrix(rep(0,dim(x[[i]])[1]),ncol = 1)
-      }
-      for(i in 1:d){
-        for(j in 1:(dim(x[[i]])[1])){
-          dO[[i]][j]=dtanh( W[[i]][[m+1]] %*% t(h) + b[[i]][[m+1]] )
-        }
-      } # dO initialization
-      
-      VW=list()
-      for(i in 1:d){
-        VW[[i]]=list()
-        VW[[i]][[1]]=matrix(rep(0,q*p),nrow=q)
-      }
-      
-      for(i in 1:d){
-        VW[[i]][[m+1]]=matrix(rep(0,q),nrow=1)
-      } # VW is initialization 1st moment matrix list for W
-      
-      Vb=list()
-      for(i in 1:d){
-        Vb[[i]]=list()
-        for(l in 1:m){
-          Vb[[i]][[l]]=matrix(0,nrow=q)
+          H[[i]][[1]][j,]= t( tanh( W[[i]][[1]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[1]] ) ) 
         }
       }
-      
-      for(i in 1:d){
-        Vb[[i]][[m+1]]=matrix(0,nrow=1)
-      } # Vb is initialization 1st moment matrix list for b
-      
-      H=list()
-      for(i in 1:d){
-        H[[i]]=list()
-      }
-      for(i in 1:d){
-        for(l in 1:m){
-          H[[i]][[l]]=matrix( rep( 0 , dim(x[[i]])[1] * q ),ncol=q)
-        }
-      } #H initialization
-      
-      dH=list()
-      for(i in 1:d){
-        dH[[i]]=list()
-      }
-      for(i in 1:d){
-        for(l in 1:m){
-          dH[[i]][[l]]=matrix( rep( 0 , dim(x[[i]])[1] * q ),ncol=q)
-        }
-      } # dH initialization
-      
-      C=diag(p) # C initialization
-      
-      dW=list()
-      for(i in 1:d){
-        dW[[i]]=list()
-        dW[[i]][[1]]=matrix( rep(0,q*p) ,nrow=q)
-      }
-      
-      for(i in 1:d){
-        dW[[i]][[m+1]]=matrix( rep(0,q) ,nrow=1)
-      } # dW initialization
-      
-      db=list()
-      for(i in 1:d){
-        db[[i]]=list()
-        for(l in 1:m){
-          db[[i]][[l]]=matrix(0,nrow=q)
-        }
-      }
-      
-      for(i in 1:d){
-        db[[i]][[m+1]]=matrix(0,nrow=1)
-      } # db initialization
-      
-      diffW=list()
-      for(i in 1:d){
-        diffW[[i]]=list()
-        diffW[[i]][[1]]=matrix( rep(0,q*p) ,nrow=q)
-      }
-      
-      for(i in 1:d){
-        diffW[[i]][[m+1]]=matrix( rep(0,q) ,nrow=1)
-      } #W difference initialization diffW
     }else{
-      W=list()
-      for(i in 1:d){
-        W[[i]]=list()
-        W[[i]][[1]]=matrix(runif(q*p,min = - sqrt(6/(q+p)), max = sqrt(6/(q+p)) ),nrow=q)
-      }
-      
-      for(i in 1:d){
-        for(l in 2:m){
-          W[[i]][[l]]=matrix(runif(q*q,min = - sqrt(6/(q+q)), max = sqrt(6/(q+q)) ),nrow=q)
-        }
-      }
-      
-      for(i in 1:d){
-        W[[i]][[m+1]]=matrix(runif(q,min = - sqrt(6/(q+1)), max = sqrt(6/(q+1)) ),nrow=1)
-      } #W is initialization weight matrix list
-      
-      b=list()
-      for(i in 1:d){
-        b[[i]]=list()
-        for(l in 1:m){
-          b[[i]][[l]]=matrix(0,nrow=q)
-        }
-      }
-      
-      for(i in 1:d){
-        b[[i]][[m+1]]=matrix(0,nrow=1)
-      } #b is initialization bias matrix list
-      
-      O=list()
-      for(i in 1:d){
-        O[[i]]=matrix(rep(0,dim(x[[i]])[1]),ncol = 1)
-      }
-      
       for(i in 1:d){
         for(j in 1:(dim(x[[i]])[1])){
-          
-          l=1
-          h=t( tanh( W[[i]][[l]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[l]] ) )
-          repeat{
-            l=l+1
-            h=t (tanh( W[[i]][[l]] %*% t(h) + b[[i]][[l]] ) )
-            if(l == m)
-              break
-          }
-          O[[i]][j]=tanh( W[[i]][[m+1]] %*% t(h) + b[[i]][[m+1]] )
+          H[[i]][[1]][j,]= t( tanh( W[[i]][[1]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[1]] ) ) 
           
         }
-      } #compute Output O
-      
-      dO=list()
-      for(i in 1:d){
-        dO[[i]]= matrix(rep(0,dim(x[[i]])[1]),ncol = 1)
       }
-      for(i in 1:d){
-        for(j in 1:(dim(x[[i]])[1])){
-          l=1
-          h=t( tanh( W[[i]][[l]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[l]] ) )
-          repeat{
-            l=l+1
-            h=t (tanh( W[[i]][[l]] %*% t(h) + b[[i]][[l]] ) )
-            if(l == m)
-              break
-          }
-          dO[[i]][j]=dtanh( W[[i]][[m+1]] %*% t(h) + b[[i]][[m+1]] )        
-        }
-      } #dO initialization
-      
-      VW=list()
-      for(i in 1:d){
-        VW[[i]]=list()
-        VW[[i]][[1]]=matrix(rep(0,q*p),nrow=q)
-      }
-      
       for(i in 1:d){
         for(l in 2:m){
-          VW[[i]][[l]]=matrix(rep(0,q*q),nrow=q)
+          for(j in 1:(dim(x[[i]])[1])){
+            H[[i]][[l]][j,] = t( tanh( W[[i]][[l]] %*% t(t(H[[i]][[l-1]][j,])) + b[[i]][[l]] ) )
+          }
         }
-      }
-      
-      for(i in 1:d){
-        VW[[i]][[m+1]]=matrix(rep(0,q),nrow=1)
-      } #VW is initialization 1st moment matrix list for W
-      
-      Vb=list()
-      for(i in 1:d){
-        Vb[[i]]=list()
-        for(l in 1:m){
-          Vb[[i]][[l]]=matrix(0,nrow=q)
-        }
-      }
-      
-      for(i in 1:d){
-        Vb[[i]][[m+1]]=matrix(0,nrow=1)
-      } #Vb is initialization 1st moment matrix list for b
+      }#compute H
+    }
     
-      H=list()
+    if(m==1){
       for(i in 1:d){
-        H[[i]]=list()
-      }
-      for(i in 1:d){
-        for(l in 1:m){
-          H[[i]][[l]]=matrix( rep( 0 , dim(x[[i]])[1] * q ),ncol=q)
+        for(j in 1:(dim(x[[i]])[1])){
+          dH[[i]][[1]][j,]= t( dtanh( W[[i]][[1]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[1]] ) ) 
         }
-      } #H initialization
-      
-      dH=list()
-      for(i in 1:d){
-        dH[[i]]=list()
       }
+    }else{
       for(i in 1:d){
-        for(l in 1:m){
-          dH[[i]][[l]]=matrix( rep( 0 , dim(x[[i]])[1] * q ),ncol=q)
+        for(j in 1:(dim(x[[i]])[1])){
+          dH[[i]][[1]][j,]= t( dtanh( W[[i]][[1]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[1]] ) ) 
         }
-      } #dH initialization
-      
-      C=diag(p) #C initialization
-      
-      dW=list()
-      for(i in 1:d){
-        dW[[i]]=list()
-        dW[[i]][[1]]=matrix( rep(0,q*p) ,nrow=q)
       }
       
       for(i in 1:d){
         for(l in 2:m){
-          dW[[i]][[l]]=matrix( rep(0,q*q) ,nrow=q)
+          for(j in 1:(dim(x[[i]])[1])){
+            dH[[i]][[l]][j,] = t( dtanh( W[[i]][[l]] %*% t(t(H[[i]][[l-1]][j,])) + b[[i]][[l]] ) )
+          }
         }
-      }
-      
-      for(i in 1:d){
-        dW[[i]][[m+1]]=matrix( rep(0,q) ,nrow=1)
-      } #dW initialization
-      
-      db=list()
-      for(i in 1:d){
-        db[[i]]=list()
-        for(l in 1:m){
-          db[[i]][[l]]=matrix(0,nrow=q)
-        }
-      }
-      
-      for(i in 1:d){
-        db[[i]][[m+1]]=matrix(0,nrow=1)
-      } #db initialization
-      
-      diffW=list()
-      for(i in 1:d){
-        diffW[[i]]=list()
-        diffW[[i]][[1]]=matrix( rep(0,q*p) ,nrow=q)
-      }
-      
-      for(i in 1:d){
-        for(l in 2:m){
-          diffW[[i]][[l]]=matrix( rep(0,q*q) ,nrow=q)
-        }
-      }
-      
-      for(i in 1:d){
-        diffW[[i]][[m+1]]=matrix( rep(0,q) ,nrow=1)
-      } #W difference initialization diffW
+      }#compute dH
     }
     
     
-    plot(1:maxiter, seq(0,0.01,length.out = maxiter), xlim = c(1,maxiter), ylim = c (0,0.01), type = "n", axes = F, xlab = "iteration times", ylab="maximum difference")
-    box()
-    axis(side = 1, at = c(seq(1,maxiter+1,length.out=51)))
-    axis(side = 2, at = c(seq(0,0.01,length.out = 21)))
-    abline(h=0.001,col="red")
-    #generate a null plot
+    for(k in 1:p){
+      hat_w=0
+      for(i in 1:d){
+        hat_w = hat_w + (w_C[[i]][k,k])^2 
+      }
+      hat_w=sqrt(hat_w)
+      if(hat_w >= a){
+        C[k,k]=1/sqrt(hat_w)
+      }else{
+        C[k,k]=(hat_w)*(-1/(2*a^2)) + 3/(2*a)
+      }
+    }#compute C for t iteration by smoothing function
     
-    repeat{
-      w_C<-w
-      for(k in 1:p){
-        sum_w=0
-        for(i in 1:d){
-          sum_w = sum_w + (w_C[[i]][k,k])^2
-        }
-        if(sum_w <= d * 10^(-20)){
-          for(i in 1:d){
-            w_C[[i]][k,k]=10^(-10)
-          }
-        }
-      }#prevent small value 
+    tt=tt+1
+    #iteration count
+    
+    if(m==1){
       
-      if(m==1){
-        for(i in 1:d){
-          for(j in 1:(dim(x[[i]])[1])){
-            H[[i]][[1]][j,]= t( tanh( W[[i]][[1]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[1]] ) ) 
-          }
+      for(i in 1:d){
+        sum_dw = 0
+        for(j in 1:(dim(x[[i]])[1])){
+          sum_dw_j = c(dO[[i]][j]) * W[[i]][[2]]
+          sum_dw_j = sum_dw_j %*% diag( dH[[i]][[1]][j,] ) %*% W[[i]][[1]]
+          sum_dw_j = t(t( x[[i]][j,] )) %*% sum_dw_j  
+          sum_dw_j = t( sum_dw_j ) * (O[[i]][j]-y[[i]][j])
+          sum_dw = sum_dw + sum_dw_j
         }
-      }else{
-        for(i in 1:d){
-          for(j in 1:(dim(x[[i]])[1])){
-            H[[i]][[1]][j,]= t( tanh( W[[i]][[1]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[1]] ) ) 
-            
-          }
+        dw[[i]] = sum_dw / (dim(x[[i]])[1]) + lambda * w[[i]] * C 
+      }#w
+      
+      for(i in 1:d){
+        sum_dW = 0
+        for(j in 1:(dim(x[[i]])[1])){
+          sum_dW_j = c(dO[[i]][j]) * W[[i]][[2]]
+          sum_dW_j = sum_dW_j %*% diag( dH[[i]][[1]][j,] )
+          sum_dW_j = w[[i]] %*% t(t( x[[i]][j,] )) %*% sum_dW_j  
+          sum_dW_j = t( sum_dW_j ) * (O[[i]][j]-y[[i]][j])
+          sum_dW = sum_dW + sum_dW_j
         }
-        for(i in 1:d){
-          for(l in 2:m){
-            for(j in 1:(dim(x[[i]])[1])){
-              H[[i]][[l]][j,] = t( tanh( W[[i]][[l]] %*% t(t(H[[i]][[l-1]][j,])) + b[[i]][[l]] ) )
-            }
-          }
-        }#compute H
-      }
+        dW[[i]][[1]] = sum_dW / (dim(x[[i]])[1]) + Lambda * W[[i]][[1]]   
+      }#1
       
-      if(m==1){
-        for(i in 1:d){
-          for(j in 1:(dim(x[[i]])[1])){
-            dH[[i]][[1]][j,]= t( dtanh( W[[i]][[1]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[1]] ) ) 
-          }
+      for(i in 1:d){
+        sum_dW = 0
+        for(j in 1:(dim(x[[i]])[1])){
+          sum_dW_j = t(H[[i]][[m]][j,]) * c(dO[[i]][j]) * (O[[i]][j]-y[[i]][j])  
+          sum_dW = sum_dW + sum_dW_j
         }
-      }else{
-        for(i in 1:d){
-          for(j in 1:(dim(x[[i]])[1])){
-            dH[[i]][[1]][j,]= t( dtanh( W[[i]][[1]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[1]] ) ) 
+        dW[[i]][[m+1]] = sum_dW / (dim(x[[i]])[1]) + Lambda * W[[i]][[m+1]] 
+      }#m+1 #update dW 1:m+1
+      
+    }else{
+      
+      for(i in 1:d){
+        sum_dw = 0
+        for(j in 1:(dim(x[[i]])[1])){
+          sum_dw_j = c(dO[[i]][j]) * W[[i]][[m+1]]
+          for(l in m:2){
+            sum_dw_j = sum_dw_j %*% diag( dH[[i]][[l]][j,] ) %*% W[[i]][[l]]
           }
+          sum_dw_j = sum_dw_j %*% diag( dH[[i]][[1]][j,] ) %*% W[[i]][[1]]
+          sum_dw_j = t(t( x[[i]][j,] )) %*% sum_dw_j  
+          sum_dw_j = t( sum_dw_j ) * (O[[i]][j]-y[[i]][j])
+          sum_dw = sum_dw + sum_dw_j
         }
+        dw[[i]] = sum_dw / (dim(x[[i]])[1]) + lambda * w[[i]] * C 
+      } #w
       
-        for(i in 1:d){
-          for(l in 2:m){
-            for(j in 1:(dim(x[[i]])[1])){
-              dH[[i]][[l]][j,] = t( dtanh( W[[i]][[l]] %*% t(t(H[[i]][[l-1]][j,])) + b[[i]][[l]] ) )
-            }
+      for(i in 1:d){
+        sum_dW = 0
+        for(j in 1:(dim(x[[i]])[1])){
+          sum_dW_j = c(dO[[i]][j]) * W[[i]][[m+1]]
+          for(l in m:2){
+            sum_dW_j = sum_dW_j %*% diag( dH[[i]][[l]][j,] ) %*% W[[i]][[l]]
           }
-        }#compute dH
-      }
-      
-      
-      for(k in 1:p){
-        hat_w=0
-        for(i in 1:d){
-          hat_w = hat_w + (w_C[[i]][k,k])^2 
+          sum_dW_j = sum_dW_j %*% diag( dH[[i]][[1]][j,] )
+          sum_dW_j = w[[i]] %*% t(t( x[[i]][j,] )) %*% sum_dW_j  
+          sum_dW_j = t( sum_dW_j ) * (O[[i]][j]-y[[i]][j])
+          sum_dW = sum_dW + sum_dW_j
         }
-        hat_w=sqrt(hat_w)
-        if(hat_w >= a){
-          C[k,k]=1/sqrt(hat_w)
-        }else{
-          C[k,k]=(hat_w)*(-1/(2*a^2)) + 3/(2*a)
-        }
-      }#compute C for t iteration by smoothing function
+        dW[[i]][[1]] = sum_dW / (dim(x[[i]])[1]) + Lambda * W[[i]][[1]] 
+      } #1
       
-      tt=tt+1
-      #iteration count
-      
-      if(m==1){
+      for(i in 1:d){
         
-        for(i in 1:d){
-          sum_dw = 0
-          for(j in 1:(dim(x[[i]])[1])){
-            sum_dw_j = c(dO[[i]][j]) * W[[i]][[2]]
-            sum_dw_j = sum_dw_j %*% diag( dH[[i]][[1]][j,] ) %*% W[[i]][[1]]
-            sum_dw_j = t(t( x[[i]][j,] )) %*% sum_dw_j  
-            sum_dw_j = t( sum_dw_j ) * (O[[i]][j]-y[[i]][j])
-            sum_dw = sum_dw + sum_dw_j
-          }
-          dw[[i]] = sum_dw / (dim(x[[i]])[1]) + lambda * w[[i]] * C 
-        }#w
-        
-        for(i in 1:d){
-          sum_dW = 0
-          for(j in 1:(dim(x[[i]])[1])){
-            sum_dW_j = c(dO[[i]][j]) * W[[i]][[2]]
-            sum_dW_j = sum_dW_j %*% diag( dH[[i]][[1]][j,] )
-            sum_dW_j = w[[i]] %*% t(t( x[[i]][j,] )) %*% sum_dW_j  
-            sum_dW_j = t( sum_dW_j ) * (O[[i]][j]-y[[i]][j])
-            sum_dW = sum_dW + sum_dW_j
-          }
-          dW[[i]][[1]] = sum_dW / (dim(x[[i]])[1]) + Lambda * W[[i]][[1]]   
-        }#1
-        
-        for(i in 1:d){
-          sum_dW = 0
-          for(j in 1:(dim(x[[i]])[1])){
-            sum_dW_j = t(H[[i]][[m]][j,]) * c(dO[[i]][j]) * (O[[i]][j]-y[[i]][j])  
-            sum_dW = sum_dW + sum_dW_j
-          }
-          dW[[i]][[m+1]] = sum_dW / (dim(x[[i]])[1]) + Lambda * W[[i]][[m+1]] 
-        }#m+1 #update dW 1:m+1
-        
-      }else{
-       
-        for(i in 1:d){
-          sum_dw = 0
-          for(j in 1:(dim(x[[i]])[1])){
-            sum_dw_j = c(dO[[i]][j]) * W[[i]][[m+1]]
-            for(l in m:2){
-              sum_dw_j = sum_dw_j %*% diag( dH[[i]][[l]][j,] ) %*% W[[i]][[l]]
-            }
-            sum_dw_j = sum_dw_j %*% diag( dH[[i]][[1]][j,] ) %*% W[[i]][[1]]
-            sum_dw_j = t(t( x[[i]][j,] )) %*% sum_dw_j  
-            sum_dw_j = t( sum_dw_j ) * (O[[i]][j]-y[[i]][j])
-            sum_dw = sum_dw + sum_dw_j
-          }
-          dw[[i]] = sum_dw / (dim(x[[i]])[1]) + lambda * w[[i]] * C 
-        } #w
-        
-        for(i in 1:d){
-          sum_dW = 0
-          for(j in 1:(dim(x[[i]])[1])){
-            sum_dW_j = c(dO[[i]][j]) * W[[i]][[m+1]]
-            for(l in m:2){
-              sum_dW_j = sum_dW_j %*% diag( dH[[i]][[l]][j,] ) %*% W[[i]][[l]]
-            }
-            sum_dW_j = sum_dW_j %*% diag( dH[[i]][[1]][j,] )
-            sum_dW_j = w[[i]] %*% t(t( x[[i]][j,] )) %*% sum_dW_j  
-            sum_dW_j = t( sum_dW_j ) * (O[[i]][j]-y[[i]][j])
-            sum_dW = sum_dW + sum_dW_j
-          }
-          dW[[i]][[1]] = sum_dW / (dim(x[[i]])[1]) + Lambda * W[[i]][[1]] 
-        } #1
-        
-        for(i in 1:d){
-          
-          if(m==2){
-            sum_dW=0
-            for(j in 1:(dim(x[[i]])[1])){
-              sum_dW_j = c(dO[[i]][j]) * W[[i]][[m+1]]
-              sum_dW_j = sum_dW_j %*% diag( dH[[i]][[m]][j,] )
-              sum_dW_j = t(t( H[[i]][[m-1]][j,] )) %*% sum_dW_j  
-              sum_dW_j = t( sum_dW_j ) * (O[[i]][j]-y[[i]][j])
-              sum_dW = sum_dW + sum_dW_j
-            }
-            dW[[i]][[m]] = sum_dW / (dim(x[[i]])[1]) + Lambda * W[[i]][[m]]  #m
-          }else{
-            for(l in 2:(m-1)){
-              sum_dW = 0
-              for(j in 1:(dim(x[[i]])[1])){
-                sum_dW_j = c(dO[[i]][j]) * W[[i]][[m+1]]
-                for(ll in m:(l+1)){
-                  sum_dW_j = sum_dW_j %*% diag( dH[[i]][[ll]][j,] ) %*% W[[i]][[ll]]
-                }
-                sum_dW_j = sum_dW_j %*% diag( dH[[i]][[l]][j,] )
-                sum_dW_j = t(t( H[[i]][[l-1]][j,] )) %*% sum_dW_j  
-                sum_dW_j = t( sum_dW_j ) * (O[[i]][j]-y[[i]][j])
-                sum_dW = sum_dW + sum_dW_j
-              }
-              dW[[i]][[l]] = sum_dW / (dim(x[[i]])[1]) + Lambda * W[[i]][[l]]  
-            }
-          }#2:m-1 
+        if(m==2){
           sum_dW=0
           for(j in 1:(dim(x[[i]])[1])){
             sum_dW_j = c(dO[[i]][j]) * W[[i]][[m+1]]
@@ -829,221 +820,248 @@ hopin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,Lambda,a,threshold,node
             sum_dW_j = t( sum_dW_j ) * (O[[i]][j]-y[[i]][j])
             sum_dW = sum_dW + sum_dW_j
           }
-          dW[[i]][[m]] = sum_dW / (dim(x[[i]])[1]) + Lambda * W[[i]][[m]]  
-          #m
-        }#2:m
-        
-        for(i in 1:d){
-          sum_dW = 0
-          for(j in 1:(dim(x[[i]])[1])){
-            sum_dW_j = t(H[[i]][[m]][j,]) * c(dO[[i]][j]) * (O[[i]][j]-y[[i]][j])  
-            sum_dW = sum_dW + sum_dW_j
+          dW[[i]][[m]] = sum_dW / (dim(x[[i]])[1]) + Lambda * W[[i]][[m]]  #m
+        }else{
+          for(l in 2:(m-1)){
+            sum_dW = 0
+            for(j in 1:(dim(x[[i]])[1])){
+              sum_dW_j = c(dO[[i]][j]) * W[[i]][[m+1]]
+              for(ll in m:(l+1)){
+                sum_dW_j = sum_dW_j %*% diag( dH[[i]][[ll]][j,] ) %*% W[[i]][[ll]]
+              }
+              sum_dW_j = sum_dW_j %*% diag( dH[[i]][[l]][j,] )
+              sum_dW_j = t(t( H[[i]][[l-1]][j,] )) %*% sum_dW_j  
+              sum_dW_j = t( sum_dW_j ) * (O[[i]][j]-y[[i]][j])
+              sum_dW = sum_dW + sum_dW_j
+            }
+            dW[[i]][[l]] = sum_dW / (dim(x[[i]])[1]) + Lambda * W[[i]][[l]]  
           }
-          dW[[i]][[m+1]] = sum_dW / (dim(x[[i]])[1]) + Lambda * W[[i]][[m+1]] 
-        }#m+1
-        #update dW 1:m+1
-      }
+        }#2:m-1 
+        sum_dW=0
+        for(j in 1:(dim(x[[i]])[1])){
+          sum_dW_j = c(dO[[i]][j]) * W[[i]][[m+1]]
+          sum_dW_j = sum_dW_j %*% diag( dH[[i]][[m]][j,] )
+          sum_dW_j = t(t( H[[i]][[m-1]][j,] )) %*% sum_dW_j  
+          sum_dW_j = t( sum_dW_j ) * (O[[i]][j]-y[[i]][j])
+          sum_dW = sum_dW + sum_dW_j
+        }
+        dW[[i]][[m]] = sum_dW / (dim(x[[i]])[1]) + Lambda * W[[i]][[m]]  
+        #m
+      }#2:m
       
-      if(m==1){
-        for(i in 1:d){
-          sum_db = 0
-          for(j in 1:(dim(x[[i]])[1])){
-            sum_db_j = c(dO[[i]][j]) * W[[i]][[2]]
-            sum_db_j = sum_db_j %*% diag( dH[[i]][[1]][j,] )
-            sum_db_j = t( sum_db_j ) * (O[[i]][j]-y[[i]][j])
-            sum_db = sum_db + sum_db_j
+      for(i in 1:d){
+        sum_dW = 0
+        for(j in 1:(dim(x[[i]])[1])){
+          sum_dW_j = t(H[[i]][[m]][j,]) * c(dO[[i]][j]) * (O[[i]][j]-y[[i]][j])  
+          sum_dW = sum_dW + sum_dW_j
+        }
+        dW[[i]][[m+1]] = sum_dW / (dim(x[[i]])[1]) + Lambda * W[[i]][[m+1]] 
+      }#m+1
+      #update dW 1:m+1
+    }
+    
+    if(m==1){
+      for(i in 1:d){
+        sum_db = 0
+        for(j in 1:(dim(x[[i]])[1])){
+          sum_db_j = c(dO[[i]][j]) * W[[i]][[2]]
+          sum_db_j = sum_db_j %*% diag( dH[[i]][[1]][j,] )
+          sum_db_j = t( sum_db_j ) * (O[[i]][j]-y[[i]][j])
+          sum_db = sum_db + sum_db_j
+        }
+        db[[i]][[1]] = sum_db / (dim(x[[i]])[1])  
+      } #1
+      
+      for(i in 1:d){
+        sum_db = 0
+        for(j in 1:(dim(x[[i]])[1])){
+          sum_db_j = c(dO[[i]][j]) * (O[[i]][j]-y[[i]][j])  
+          sum_db = sum_db + sum_db_j
+        }
+        
+        db[[i]][[m+1]] = sum_db / (dim(x[[i]])[1])  
+      }#m+1
+      #update db 1:m+1
+      
+    }else{
+      
+      for(i in 1:d){
+        sum_db = 0
+        for(j in 1:(dim(x[[i]])[1])){
+          sum_db_j = c(dO[[i]][j]) * W[[i]][[m+1]]
+          for(l in m:2){
+            sum_db_j = sum_db_j %*% diag( dH[[i]][[l]][j,] ) %*% W[[i]][[l]]
           }
-          db[[i]][[1]] = sum_db / (dim(x[[i]])[1])  
-        } #1
-        
-        for(i in 1:d){
-          sum_db = 0
-          for(j in 1:(dim(x[[i]])[1])){
-            sum_db_j = c(dO[[i]][j]) * (O[[i]][j]-y[[i]][j])  
-            sum_db = sum_db + sum_db_j
-          }
-          
-          db[[i]][[m+1]] = sum_db / (dim(x[[i]])[1])  
-        }#m+1
-        #update db 1:m+1
-        
-      }else{
-        
-        for(i in 1:d){
-          sum_db = 0
+          sum_db_j = sum_db_j %*% diag( dH[[i]][[1]][j,] )
+          sum_db_j = t( sum_db_j ) * (O[[i]][j]-y[[i]][j])
+          sum_db = sum_db + sum_db_j
+        }
+        db[[i]][[1]] = sum_db / (dim(x[[i]])[1])  
+      }#1
+      
+      for(i in 1:d){
+        if(m==2){
+          sum_db=0
           for(j in 1:(dim(x[[i]])[1])){
             sum_db_j = c(dO[[i]][j]) * W[[i]][[m+1]]
-            for(l in m:2){
-              sum_db_j = sum_db_j %*% diag( dH[[i]][[l]][j,] ) %*% W[[i]][[l]]
-            }
-            sum_db_j = sum_db_j %*% diag( dH[[i]][[1]][j,] )
+            sum_db_j = sum_db_j %*% diag( dH[[i]][[m]][j,] )
             sum_db_j = t( sum_db_j ) * (O[[i]][j]-y[[i]][j])
             sum_db = sum_db + sum_db_j
           }
-          db[[i]][[1]] = sum_db / (dim(x[[i]])[1])  
-        }#1
-        
-        for(i in 1:d){
-          if(m==2){
-            sum_db=0
+          db[[i]][[m]] = sum_db / (dim(x[[i]])[1]) 
+          #m
+        }else{
+          for(l in 2:(m-1)){
+            sum_db = 0
             for(j in 1:(dim(x[[i]])[1])){
               sum_db_j = c(dO[[i]][j]) * W[[i]][[m+1]]
-              sum_db_j = sum_db_j %*% diag( dH[[i]][[m]][j,] )
-              sum_db_j = t( sum_db_j ) * (O[[i]][j]-y[[i]][j])
-              sum_db = sum_db + sum_db_j
-            }
-            db[[i]][[m]] = sum_db / (dim(x[[i]])[1]) 
-            #m
-          }else{
-            for(l in 2:(m-1)){
-              sum_db = 0
-              for(j in 1:(dim(x[[i]])[1])){
-                sum_db_j = c(dO[[i]][j]) * W[[i]][[m+1]]
-                for(ll in m:(l+1)){
-                  sum_db_j = sum_db_j %*% diag( dH[[i]][[ll]][j,] ) %*% W[[i]][[ll]]
-                }
-                sum_db_j = sum_db_j %*% diag( dH[[i]][[l]][j,] )
-                sum_db_j = t( sum_db_j ) * (O[[i]][j]-y[[i]][j])
-                sum_db = sum_db + sum_db_j
+              for(ll in m:(l+1)){
+                sum_db_j = sum_db_j %*% diag( dH[[i]][[ll]][j,] ) %*% W[[i]][[ll]]
               }
-              db[[i]][[l]] = sum_db / (dim(x[[i]])[1]) 
-            } #2:m-1 
-            
-            sum_db=0
-            for(j in 1:(dim(x[[i]])[1])){
-              sum_db_j = c(dO[[i]][j]) * W[[i]][[m+1]]
-              sum_db_j = sum_db_j %*% diag( dH[[i]][[m]][j,] )
+              sum_db_j = sum_db_j %*% diag( dH[[i]][[l]][j,] )
               sum_db_j = t( sum_db_j ) * (O[[i]][j]-y[[i]][j])
               sum_db = sum_db + sum_db_j
             }
-            db[[i]][[m]] = sum_db / (dim(x[[i]])[1]) 
-            #m
-          }
-        }
-        #2:m
-        
-        for(i in 1:d){
-          sum_db = 0
+            db[[i]][[l]] = sum_db / (dim(x[[i]])[1]) 
+          } #2:m-1 
+          
+          sum_db=0
           for(j in 1:(dim(x[[i]])[1])){
-            sum_db_j = c(dO[[i]][j]) * (O[[i]][j]-y[[i]][j])  
+            sum_db_j = c(dO[[i]][j]) * W[[i]][[m+1]]
+            sum_db_j = sum_db_j %*% diag( dH[[i]][[m]][j,] )
+            sum_db_j = t( sum_db_j ) * (O[[i]][j]-y[[i]][j])
             sum_db = sum_db + sum_db_j
           }
-          db[[i]][[m+1]] = sum_db / (dim(x[[i]])[1])
-        }
-        #m+1
-        #update db 1:m+1
-        
-      }
-      
-      w_old = w
-      #backup w
-      for(i in 1:d){
-        Vw[[i]] = alpha * Vw[[i]] - eta * dw[[i]]
-        
-        w[[i]] = w[[i]] + Vw[[i]] 
-      }
-      #backpropagation by Momentum for w
-      
-      for(i in 1:d){
-        for(j in 1:p){
-          for(k in 1:p){
-            if(j!=k){
-              w[[i]][j,k]=0
-            }
-            
-          }
+          db[[i]][[m]] = sum_db / (dim(x[[i]])[1]) 
+          #m
         }
       }
-      #adjust non-diag
-      
-      W_old = W
-      #backup W
+      #2:m
       
       for(i in 1:d){
-        for(l in 1:(m+1)){
-          VW[[i]][[l]] = alpha * VW[[i]][[l]] - eta * dW[[i]][[l]]
-          Vb[[i]][[l]] = alpha * Vb[[i]][[l]] - eta * db[[i]][[l]]
-          
-          W[[i]][[l]] = W[[i]][[l]] + VW[[i]][[l]] 
-          b[[i]][[l]] = b[[i]][[l]] + Vb[[i]][[l]] 
+        sum_db = 0
+        for(j in 1:(dim(x[[i]])[1])){
+          sum_db_j = c(dO[[i]][j]) * (O[[i]][j]-y[[i]][j])  
+          sum_db = sum_db + sum_db_j
         }
+        db[[i]][[m+1]] = sum_db / (dim(x[[i]])[1])
       }
-      #backpropagation by Momentum for W b
-      
-      for(i in 1:d){
-        for(l in 1:(m+1)){
-          diffW[[i]][[l]] = W[[i]][[l]] - W_old[[i]][[l]]
-        }
-      }
-      
-      diffW_max = matrix(0,d,m+1)
-      for(i in 1:d){
-        for(l in 1:(m+1)){
-          diffW_max[i,l]=max(abs(diffW[[i]][[l]]))
-        }
-      }
-      
-      ###
-      for(i in 1:d){
-        diffw[[i]] = w[[i]] - w_old[[i]]
-      }
-      
-      diffw_max = rep(0,d)
-      for(i in 1:d){
-        diffw_max[i]=max(abs(diffw[[i]]))
-      }
-      
-      maximum1 = max(diffW_max)
-      maximum2 = max(diffw_max)
-      maximum = max(maximum1,maximum2)
-      #compute maximum difference value 
-      
-      points(tt,maximum)
-      #plot points
-      
-      if(maximum < varepsilon | tt == maxiter){
-        break
-      }
-      #stop criterion
-      
-      if(m==1){
-        
-        for(i in 1:d){
-          for(j in 1:(dim(x[[i]])[1])){
-            
-            l=1
-            h=t( tanh( W[[i]][[l]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[l]] ) )
-            O[[i]][j]= tanh( W[[i]][[m+1]] %*% t(h) + b[[i]][[m+1]] )
-            
-          }
-        }
-        #compute Output O
-        #update O 
-        
-      }else{
-        
-        for(i in 1:d){
-          for(j in 1:(dim(x[[i]])[1])){
-            
-            l=1
-            h=t( tanh( W[[i]][[l]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[l]] ) )
-            repeat{
-              l=l+1
-              h=t (tanh( W[[i]][[l]] %*% t(h) + b[[i]][[l]] ) )
-              if(l == m)
-                break
-            }
-            O[[i]][j]= tanh( W[[i]][[m+1]] %*% t(h) + b[[i]][[m+1]] )
-            
-          }
-        }
-        #compute Output O
-        #update O 
-        
-      }
+      #m+1
+      #update db 1:m+1
       
     }
-    #HoPIN training
+    
+    w_old = w
+    #backup w
+    for(i in 1:d){
+      Vw[[i]] = alpha * Vw[[i]] - eta * dw[[i]]
+      
+      w[[i]] = w[[i]] + Vw[[i]] 
+    }
+    #backpropagation by Momentum for w
+    
+    for(i in 1:d){
+      for(j in 1:p){
+        for(k in 1:p){
+          if(j!=k){
+            w[[i]][j,k]=0
+          }
+          
+        }
+      }
+    }
+    #adjust non-diag
+    
+    W_old = W
+    #backup W
+    
+    for(i in 1:d){
+      for(l in 1:(m+1)){
+        VW[[i]][[l]] = alpha * VW[[i]][[l]] - eta * dW[[i]][[l]]
+        Vb[[i]][[l]] = alpha * Vb[[i]][[l]] - eta * db[[i]][[l]]
+        
+        W[[i]][[l]] = W[[i]][[l]] + VW[[i]][[l]] 
+        b[[i]][[l]] = b[[i]][[l]] + Vb[[i]][[l]] 
+      }
+    }
+    #backpropagation by Momentum for W b
+    
+    for(i in 1:d){
+      for(l in 1:(m+1)){
+        diffW[[i]][[l]] = W[[i]][[l]] - W_old[[i]][[l]]
+      }
+    }
+    
+    diffW_max = matrix(0,d,m+1)
+    for(i in 1:d){
+      for(l in 1:(m+1)){
+        diffW_max[i,l]=max(abs(diffW[[i]][[l]]))
+      }
+    }
+    
+    ###
+    for(i in 1:d){
+      diffw[[i]] = w[[i]] - w_old[[i]]
+    }
+    
+    diffw_max = rep(0,d)
+    for(i in 1:d){
+      diffw_max[i]=max(abs(diffw[[i]]))
+    }
+    
+    maximum1 = max(diffW_max)
+    maximum2 = max(diffw_max)
+    maximum = max(maximum1,maximum2)
+    #compute maximum difference value 
+    
+    points(tt,maximum)
+    #plot points
+    
+    if(maximum < varepsilon || tt == maxiter){
+      break
+    }
+    #stop criterion
+    
+    if(m==1){
+      
+      for(i in 1:d){
+        for(j in 1:(dim(x[[i]])[1])){
+          
+          l=1
+          h=t( tanh( W[[i]][[l]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[l]] ) )
+          O[[i]][j]= tanh( W[[i]][[m+1]] %*% t(h) + b[[i]][[m+1]] )
+          
+        }
+      }
+      #compute Output O
+      #update O 
+      
+    }else{
+      
+      for(i in 1:d){
+        for(j in 1:(dim(x[[i]])[1])){
+          
+          l=1
+          h=t( tanh( W[[i]][[l]] %*% w[[i]] %*% t(t(x[[i]][j,])) + b[[i]][[l]] ) )
+          repeat{
+            l=l+1
+            h=t (tanh( W[[i]][[l]] %*% t(h) + b[[i]][[l]] ) )
+            if(l == m)
+              break
+          }
+          O[[i]][j]= tanh( W[[i]][[m+1]] %*% t(h) + b[[i]][[m+1]] )
+          
+        }
+      }
+      #compute Output O
+      #update O 
+      
+    }
+    
+  }
+  #HoPIN training
+  
+  
   
   index=NULL
   #generate variable index
@@ -1070,36 +1088,36 @@ hopin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,Lambda,a,threshold,node
     }
   } #compute SSE among d datasets
   
-  return(list(m=m,w=w,W=W,b=b,index=index,SSE=SSE,iteration=tt,yhat=O))
+  return(list(m=m,w=w,W=W,b=b,index=index,yhat=O,SSE=SSE,iteration=tt))
 }
 ###############################################################
 
 
 
-
 ##################### Algorithm - HePIN #######################
 ####### This function will give the selected feature   ########
-hepin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,beta,Lambda,a,sig,threshold,node){
+hepin=function(x,y,m,varepsilon=1e-3,maxiter=500,alpha=0.1,eta,lambda,beta,Lambda,a=0.04,sig=0.04,threshold,node){
   ##### Input: #####
   # x: a list contain all datasets' X
   #	y: a list contain all datasets' response Y
   #	m: number of layers
   # node: number of hidden nodes
-  # varepsilon: condition of convergence
-  #	maxiter: maximum number of iterations
-  # alpha: momentum parameter
+  # varepsilon: condition of convergence, default 1e-3
+  #	maxiter: maximum number of iterations, default 500
+  # alpha: momentum parameter, default 0.1
   # eta: learning rate
   # lambda, beta: tunning parameters for variable selection in the objective function
   # Lambda: tunning parameter for preventing overfitting in the objective function
-  #	a, sig: smoothing parameters for the smoothing function in the objective function
-  #	threshold: threshold: variable selection threshold
+  #	a, sig: smoothing parameters for the smoothing function in the objective function, default 0.04
+  #	threshold: variable selection threshold
   #
   ##### Output: #####
-  # w, W, b: the values of w, W, and b in the fitted network
+  # m, w, W, b: the values of m, w, W, and b in the fitted network
   #	index: selected important variables for each dataset (a list)
-  #	SSE: total SSE between fitted values and true values
+  #	yhat: the prediction values for each dataset (a list)
+  #	SSE: SSE between fitted values and true values of all datasets
   #	tt: number of final iterations
-
+  
   p=dim(x[[1]])[2]#p is the number of variables
   q=node#q is the number of hidden nodes
   d=length(x)#d is the number of datasets
@@ -1664,7 +1682,7 @@ hepin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,beta,Lambda,a,sig,thres
               sum_dW = sum_dW + sum_dW_j
             }
             dW[[i]][[l]] = sum_dW / (dim(x[[i]])[1]) + Lambda * W[[i]][[l]]  
-
+            
           }
         }
         #2:m-1 
@@ -1733,7 +1751,7 @@ hepin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,beta,Lambda,a,sig,thres
       
       for(i in 1:d){
         if(m==2){
-            sum_db=0
+          sum_db=0
           for(j in 1:(dim(x[[i]])[1])){
             sum_db_j = c(dO[[i]][j]) * W[[i]][[m+1]]
             sum_db_j = sum_db_j %*% diag( dH[[i]][[m]][j,] )
@@ -1919,7 +1937,7 @@ hepin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,beta,Lambda,a,sig,thres
     }
   }#compute SSE among d datasets
   
-  return(list(m=m,w=w,W=W,b=b,index=index,SSE=SSE,iteration=tt,yhat=O))
+  return(list(m=m,w=w,W=W,b=b,index=index,yhat=O,SSE=SSE,iteration=tt))
 }
 ###################################################################
 
@@ -1927,18 +1945,55 @@ hepin=function(x,y,m,varepsilon,maxiter,alpha,eta,lambda,beta,Lambda,a,sig,thres
 #############################################################
 #####                                                   #####
 #####                                                   #####
-#####                    Data prediction                #####
+#####       Evaluation Index for the i-th dataset       #####
+#####                                                   #####
+#####                                                   #####
+#############################################################
+### Include: SEN, SPE, GM, CCR.                         #####
+#############################################################
+
+
+###################### Evaluation Index #####################
+Eva <- function(index, b){
+  ##### Input: #####
+  # index: important variables selected by the network for the i-th dataset
+  #	b: model coefficients of the i-th dataset
+  
+  trueindex=which(b!=0)
+  p=length(b)
+  TP=0
+  FP=0
+  FN=0
+  TN=0
+  TP=length(intersect(index,trueindex))
+  FP=length(setdiff(index,trueindex))
+  FN=length(trueindex)-TP
+  TN=p-length(trueindex)-FP
+  SEN=TP/(TP+FN)
+  SPE=TN/(TN+FP)
+  GM=sqrt(SEN*SPE)
+  MR=(FP+FN)/(TP+FN+TN+FP)
+  CCR=1-MR
+  
+  eva_index=return(c(SEN,SPE,GM,CCR))
+}
+###################################################################
+
+#############################################################
+#####                                                   #####
+#####                                                   #####
+#####                   Predict function                #####
 #####                                                   #####
 #####                                                   #####
 #############################################################
 
 pre_pin=function(newx,pin){
   ##### Input: #####
-  # newx: List of new values for X at which predictions are to be made.
-  #	pin: Fitted "PIN" object.
+  # newx: a list contain new X
+  #	pin: the fitted PIN network
+  #
   ##### Output: #####
-  # A list containing the predicted values of all datasets given newx.
-  
+  # pre_pin: the prediction values for each dataset (a list)
   m=pin$m
   b=pin$b
   w=pin$w
@@ -1981,42 +2036,5 @@ pre_pin=function(newx,pin){
   }
   return(O_pre)
 }
-###################################################################
 
-#############################################################
-#####                                                   #####
-#####                                                   #####
-#####       Evaluation Index for the i-th dataset       #####
-#####                                                   #####
-#####                                                   #####
-#############################################################
-### Include: SEN, SPE, GM, CCR.                         #####
-#############################################################
-
-
-###################### Evaluation Index #####################
-Eva <- function(index, b){
-  ##### Input: #####
-  # index: important variables selected by the network for the i-th dataset
-  #	b: model coefficients of the i-th dataset
-  ##### Output: #####
-  # Evaluation Index (SEN, SPE, GM, CCR) for the i-th dataset.
-  
-  trueindex=which(b!=0)
-  TP=0
-  FP=0
-  FN=0
-  TN=0
-  TP=length(intersect(index,trueindex))
-  FP=length(setdiff(index,trueindex))
-  FN=length(trueindex)-TP
-  TN=p-length(trueindex)-FP
-  SEN=TP/(TP+FN)
-  SPE=TN/(TN+FP)
-  GM=sqrt(SEN*SPE)
-  MR=(FP+FN)/(TP+FN+TN+FP)
-  CCR=1-MR
-  
-  eva_index=return(c(SEN,SPE,GM,CCR))
-}
 ###################################################################
